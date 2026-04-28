@@ -19,11 +19,18 @@ export function AppProvider({ children }) {
         if (!profile) {
           await userService.createProfile(firebaseUser.uid, {
             displayName: firebaseUser.displayName || 'Foydalanuvchi',
-            email: firebaseUser.email,
-            role: 'observer',
-            labId: null,
+            email:       firebaseUser.email,
+            photoURL:    firebaseUser.photoURL || null,
+            role:        'observer',
+            labId:       null,
+            provider:    firebaseUser.providerData?.[0]?.providerId === 'google.com' ? 'google' : 'email',
           });
           profile = await userService.getProfile(firebaseUser.uid);
+        }
+        // photoURL ni yangilab saqlaymiz (Google profile rasm o'zgarganda)
+        if (firebaseUser.photoURL && profile.photoURL !== firebaseUser.photoURL) {
+          await userService.updateProfile(firebaseUser.uid, { photoURL: firebaseUser.photoURL });
+          profile = { ...profile, photoURL: firebaseUser.photoURL };
         }
         setUserProfile(profile);
       } else {
@@ -34,7 +41,7 @@ export function AppProvider({ children }) {
     return unsub;
   }, []);
 
-  // Unread alerts subscription (only for logged-in users)
+  // Unread alerts
   useEffect(() => {
     if (!user) { setUnreadAlerts([]); return; }
     const unsub = alertService.subscribeToUnread(setUnreadAlerts);
@@ -61,7 +68,7 @@ export function AppProvider({ children }) {
 
   const isSuperAdmin = userProfile?.role === 'super_admin';
   const isLabManager = userProfile?.role === 'lab_manager' || isSuperAdmin;
-  const isTechnician = userProfile?.role === 'technician' || isLabManager;
+  const isTechnician = userProfile?.role === 'technician'  || isLabManager;
   const canEdit      = isTechnician;
   const canScan      = isTechnician;
 

@@ -3,13 +3,17 @@ import {
   getAuth, signInWithEmailAndPassword,
   createUserWithEmailAndPassword, signOut,
   onAuthStateChanged, updateProfile,
+  sendPasswordResetEmail, updatePassword,
+  EmailAuthProvider, reauthenticateWithCredential,
+  GoogleAuthProvider, signInWithPopup,
 } from 'firebase/auth';
 import {
   getFirestore, collection, doc,
   getDoc, getDocs, addDoc, setDoc,
   updateDoc, deleteDoc, query, where,
   orderBy, limit, onSnapshot,
-  serverTimestamp, increment,
+  serverTimestamp, increment, startAfter,
+  endBefore, Timestamp,
 } from 'firebase/firestore';
 
 // ─── Config ───────────────────────────────────────────────────
@@ -25,8 +29,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db   = getFirestore(app);
+const googleProvider = new GoogleAuthProvider();
 
-// ─── STATUS CONSTANTS ─────────────────────────────────────────
+// ─── CONSTANTS ────────────────────────────────────────────────
 export const STATUS = {
   RECEIVED:      'received',
   WAITING:       'waiting',
@@ -48,13 +53,13 @@ export const STATUS_LABELS = {
 };
 
 export const LAB_TYPES = {
-  oziq_ovqat:    "Oziq-ovqat",
-  elektrotexnika:"Elektrotexnika",
-  qurilish:      "Qurilish",
-  mashinasozlik: "Mashinasozlik",
-  polimer:       "Polimer-kimyo",
-  yengil:        "Yengil sanoat",
-  bolalar:       "Bolalar o'yinchoqlari",
+  oziq_ovqat:     "Oziq-ovqat",
+  elektrotexnika: "Elektrotexnika",
+  qurilish:       "Qurilish",
+  mashinasozlik:  "Mashinasozlik",
+  polimer:        "Polimer-kimyo",
+  yengil:         "Yengil sanoat",
+  bolalar:        "Bolalar o'yinchoqlari",
 };
 
 export const ROLES = {
@@ -68,16 +73,56 @@ export const ROLES = {
 // AUTH SERVICE
 // ═══════════════════════════════════════════════════════════════
 export const authService = {
+  // Email/parol bilan ro'yxat
   async registerWithEmail(email, password, displayName, role = 'observer', labId = null) {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName });
-    await userService.createProfile(cred.user.uid, { displayName, email, role, labId });
+    await userService.createProfile(cred.user.uid, {
+      displayName, email, role, labId,
+      provider: 'email',
+    });
     return cred;
   },
 
+  // Email/parol bilan kirish
   loginWithEmail: (email, password) => signInWithEmailAndPassword(auth, email, password),
-  logout:         () => signOut(auth),
-  onAuthChange:   (cb) => onAuthStateChanged(auth, cb),
+
+  // Google bilan kirish/ro'yxat
+  async loginWithGoogle() {
+    const result = await signInWithPopup(auth, googleProvider);
+    const { user } = result;
+    // Profil yo'q bo'lsa yaratamiz
+    const existing = await userService.getProfile(user.uid);
+    if (!existing) {
+      await userService.createProfile(user.uid, {
+        displayName: user.displayName || 'Foydalanuvchi',
+        email:       user.email,
+        photoURL:    user.photoURL || null,
+        role:        'observer',
+        labId:       null,
+        provider:    'google',
+      });
+    }
+    return result;
+  },
+
+  // Parolni tiklash (email yuborish)
+  async resetPassword(email) {
+    await sendPasswordResetEmail(auth, email);
+  },
+
+  // Parolni o'zgartirish (avval qayta autentifikatsiya)
+  async changePassword(currentPassword, newPassword) {
+    const user = auth.currentUser;
+    if (!user || !user.email) throw new Error('Foydalanuvchi topilmadi');
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+  },
+
+  logout:       () => signOut(auth),
+  onAuthChange: (cb) => onAuthStateChanged(auth, cb),
+  currentUser:  () => auth.currentUser,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -87,8 +132,12 @@ export const userService = {
   async createProfile(uid, data) {
     await setDoc(doc(db, 'users', uid), {
       ...data,
-      role: data.role || 'observer',
-      labId: data.labId || null,
+      role:      data.role  || 'observer',
+      labId:     data.labId || null,
+      photoURL:  data.photoURL || null,
+      phone:     data.phone || '',
+      provider:  data.provider || 'email',
+      isActive:  true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -100,16 +149,75 @@ export const userService = {
   },
 
   async updateProfile(uid, data) {
-    await updateDoc(doc(db, 'users', uid), { ...data, updatedAt: serverTimestamp() });
+    await updateDoc(doc(db, 'users', uid), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    });
+    // Firebase Auth displayName ham yangilaymiz
+    if (data.displayName && auth.currentUser?.uid === uid) {
+      await updateProfile(auth.currentUser, { displayName: data.displayName });
+    }
   },
 
   async getAll() {
-    const snap = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
+    const snap = await getDocs(
+      query(collection(db, 'users'), orderBy('createdAt', 'desc'))
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async getAllByRole(role) {
+    const snap = await getDocs(
+      query(collection(db, 'users'), where('role', '==', role), orderBy('createdAt', 'desc'))
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async getAllByLab(labId) {
+    const snap = await getDocs(
+      query(collection(db, 'users'), where('labId', '==', labId))
+    );
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
   async setRole(uid, role, labId = null) {
-    await updateDoc(doc(db, 'users', uid), { role, labId });
+    await updateDoc(doc(db, 'users', uid), {
+      role, labId,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async setActive(uid, isActive) {
+    await updateDoc(doc(db, 'users', uid), {
+      isActive,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async delete(uid) {
+    await deleteDoc(doc(db, 'users', uid));
+  },
+
+  subscribeToAll(cb) {
+    return onSnapshot(
+      query(collection(db, 'users'), orderBy('createdAt', 'desc')),
+      snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+  },
+
+  // Foydalanuvchi statistikasi
+  async getStats() {
+    const snap = await getDocs(collection(db, 'users'));
+    const all  = snap.docs.map(d => d.data());
+    const byRole = {};
+    Object.values(ROLES).forEach(r => { byRole[r] = 0; });
+    all.forEach(u => { if (byRole[u.role] !== undefined) byRole[u.role]++; });
+    return {
+      total:    all.length,
+      active:   all.filter(u => u.isActive !== false).length,
+      inactive: all.filter(u => u.isActive === false).length,
+      byRole,
+    };
   },
 };
 
@@ -120,11 +228,11 @@ export const labService = {
   async create(data) {
     return addDoc(collection(db, 'laboratories'), {
       ...data,
-      capacity: data.capacity || 50,
+      capacity:    data.capacity || 50,
       currentLoad: 0,
-      isActive: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      isActive:    true,
+      createdAt:   serverTimestamp(),
+      updatedAt:   serverTimestamp(),
     });
   },
 
@@ -134,16 +242,35 @@ export const labService = {
   },
 
   async getAll() {
-    const snap = await getDocs(query(collection(db, 'laboratories'), orderBy('name')));
+    const snap = await getDocs(
+      query(collection(db, 'laboratories'), orderBy('name'))
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async getActive() {
+    const snap = await getDocs(
+      query(collection(db, 'laboratories'), where('isActive', '==', true), orderBy('name'))
+    );
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
   async update(id, data) {
-    await updateDoc(doc(db, 'laboratories', id), { ...data, updatedAt: serverTimestamp() });
+    await updateDoc(doc(db, 'laboratories', id), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    });
   },
 
   async delete(id) {
     await deleteDoc(doc(db, 'laboratories', id));
+  },
+
+  async setActive(id, isActive) {
+    await updateDoc(doc(db, 'laboratories', id), {
+      isActive,
+      updatedAt: serverTimestamp(),
+    });
   },
 
   subscribeToAll(cb) {
@@ -156,8 +283,37 @@ export const labService = {
   async incrementLoad(id, delta = 1) {
     await updateDoc(doc(db, 'laboratories', id), {
       currentLoad: increment(delta),
-      updatedAt: serverTimestamp(),
+      updatedAt:   serverTimestamp(),
     });
+  },
+
+  // Laboratoriya uchun to'liq statistika
+  async getStats(labId) {
+    const q = labId
+      ? query(collection(db, 'samples'), where('currentLabId', '==', labId))
+      : query(collection(db, 'samples'));
+    const snap = await getDocs(q);
+    const all  = snap.docs.map(d => d.data());
+    const byStatus = {};
+    Object.values(STATUS).forEach(s => { byStatus[s] = 0; });
+    all.forEach(s => { if (byStatus[s.currentStatus] !== undefined) byStatus[s.currentStatus]++; });
+    const compliant    = byStatus[STATUS.COMPLIANT] + byStatus[STATUS.COMPLETED];
+    const nonCompliant = byStatus[STATUS.NON_COMPLIANT];
+    const total        = compliant + nonCompliant;
+    return {
+      ...byStatus,
+      total:         all.length,
+      complianceRate: total > 0 ? Math.round((compliant / total) * 100) : 0,
+    };
+  },
+
+  // Barcha lablar uchun yuk ko'rsatkichi
+  async getLoadReport() {
+    const labs = await labService.getAll();
+    return labs.map(l => ({
+      ...l,
+      loadPct: Math.min(100, Math.round(((l.currentLoad || 0) / (l.capacity || 50)) * 100)),
+    })).sort((a, b) => b.loadPct - a.loadPct);
   },
 };
 
@@ -169,13 +325,12 @@ export const sampleService = {
     const ref = await addDoc(collection(db, 'samples'), {
       ...data,
       currentStatus: STATUS.RECEIVED,
-      currentLabId: data.initialLabId || null,
-      labsVisited: data.initialLabId ? [data.initialLabId] : [],
+      currentLabId:  data.initialLabId || null,
+      labsVisited:   data.initialLabId ? [data.initialLabId] : [],
       createdBy,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt:     serverTimestamp(),
+      updatedAt:     serverTimestamp(),
     });
-    // Create first history record
     if (data.initialLabId) {
       await historyService.add({
         sampleId:   ref.id,
@@ -196,16 +351,17 @@ export const sampleService = {
   },
 
   async getByBarcode(barcode) {
-    const q = query(collection(db, 'samples'), where('barcode', '==', barcode), limit(1));
+    const q    = query(collection(db, 'samples'), where('barcode', '==', barcode), limit(1));
     const snap = await getDocs(q);
     if (snap.empty) return null;
     return { id: snap.docs[0].id, ...snap.docs[0].data() };
   },
 
-  async getAll({ labId, status, search } = {}) {
+  async getAll({ labId, status, search, limitCount } = {}) {
     let q = query(collection(db, 'samples'), orderBy('updatedAt', 'desc'));
     if (labId)  q = query(collection(db, 'samples'), where('currentLabId', '==', labId), orderBy('updatedAt', 'desc'));
     if (status) q = query(collection(db, 'samples'), where('currentStatus', '==', status), orderBy('updatedAt', 'desc'));
+    if (limitCount) q = query(q, limit(limitCount));
     const snap = await getDocs(q);
     let samples = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (search) {
@@ -219,6 +375,36 @@ export const sampleService = {
     return samples;
   },
 
+  // Sahifalash bilan yuklash
+  async getPaginated({ labId, status, pageSize = 20, lastDoc = null } = {}) {
+    let q = query(collection(db, 'samples'), orderBy('updatedAt', 'desc'), limit(pageSize));
+    if (labId)   q = query(collection(db, 'samples'), where('currentLabId', '==', labId), orderBy('updatedAt', 'desc'), limit(pageSize));
+    if (status)  q = query(collection(db, 'samples'), where('currentStatus', '==', status), orderBy('updatedAt', 'desc'), limit(pageSize));
+    if (lastDoc) q = query(q, startAfter(lastDoc));
+    const snap = await getDocs(q);
+    return {
+      samples: snap.docs.map(d => ({ id: d.id, ...d.data() })),
+      lastDoc: snap.docs[snap.docs.length - 1] || null,
+      hasMore: snap.docs.length === pageSize,
+    };
+  },
+
+  // Sana oralig'i bo'yicha
+  async getByDateRange(from, to, { labId, status } = {}) {
+    const fromTs = Timestamp.fromDate(new Date(from));
+    const toTs   = Timestamp.fromDate(new Date(to));
+    let q = query(
+      collection(db, 'samples'),
+      where('createdAt', '>=', fromTs),
+      where('createdAt', '<=', toTs),
+      orderBy('createdAt', 'desc')
+    );
+    if (labId)  q = query(q, where('currentLabId', '==', labId));
+    if (status) q = query(q, where('currentStatus', '==', status));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
   async updateStatus(id, newStatus, employeeId, labId, note = '') {
     const sample = await sampleService.get(id);
     if (!sample) throw new Error('Namuna topilmadi');
@@ -226,7 +412,7 @@ export const sampleService = {
 
     await updateDoc(doc(db, 'samples', id), {
       currentStatus: newStatus,
-      updatedAt: serverTimestamp(),
+      updatedAt:     serverTimestamp(),
     });
 
     await historyService.add({
@@ -238,7 +424,6 @@ export const sampleService = {
       note,
     });
 
-    // Alert: if completed or non-compliant
     if (newStatus === STATUS.COMPLETED || newStatus === STATUS.NON_COMPLIANT) {
       await alertService.create({
         sampleId:    id,
@@ -251,7 +436,6 @@ export const sampleService = {
         isRead: false,
       });
     }
-
     return { oldStatus, newStatus };
   },
 
@@ -259,15 +443,15 @@ export const sampleService = {
     const sample = await sampleService.get(id);
     if (!sample) throw new Error('Namuna topilmadi');
 
-    const oldLabId = sample.currentLabId;
-    const labsVisited = [...(sample.labsVisited || [])];
+    const oldLabId     = sample.currentLabId;
+    const labsVisited  = [...(sample.labsVisited || [])];
     if (!labsVisited.includes(toLabId)) labsVisited.push(toLabId);
 
     await updateDoc(doc(db, 'samples', id), {
       currentLabId:  toLabId,
       currentStatus: STATUS.RECEIVED,
       labsVisited,
-      updatedAt: serverTimestamp(),
+      updatedAt:     serverTimestamp(),
     });
 
     await historyService.add({
@@ -276,29 +460,39 @@ export const sampleService = {
       oldStatus:  sample.currentStatus,
       newStatus:  STATUS.RECEIVED,
       employeeId,
-      note:       note || `${oldLabId} laboratoriyasidan ko'chirildi`,
+      note:       note || `Ko'chirildi`,
       isTransfer: true,
       fromLabId:  oldLabId,
       toLabId,
     });
 
-    // Update load counts
     if (oldLabId) await labService.incrementLoad(oldLabId, -1);
     await labService.incrementLoad(toLabId, 1);
 
-    // Alert
     await alertService.create({
-      sampleId: id,
-      barcode:  sample.barcode,
+      sampleId:    id,
+      barcode:     sample.barcode,
       productName: sample.productName,
-      type: 'info',
-      message: `Namuna "${sample.barcode}" yangi laboratoriyaga ko'chirildi`,
-      isRead: false,
+      type:        'info',
+      message:     `Namuna "${sample.barcode}" yangi laboratoriyaga ko'chirildi`,
+      isRead:      false,
     });
+  },
+
+  // Bir vaqtda ko'p namuna statusini o'zgartirish
+  async batchUpdateStatus(ids, newStatus, employeeId, labId, note = '') {
+    const promises = ids.map(id =>
+      sampleService.updateStatus(id, newStatus, employeeId, labId, note)
+    );
+    return Promise.allSettled(promises);
   },
 
   async delete(id) {
     await deleteDoc(doc(db, 'samples', id));
+  },
+
+  async batchDelete(ids) {
+    return Promise.allSettled(ids.map(id => deleteDoc(doc(db, 'samples', id))));
   },
 
   subscribeToAll(cb, { labId } = {}) {
@@ -315,9 +509,8 @@ export const sampleService = {
 
   async getOverdue(hours = 48) {
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-    const snap = await getDocs(
-      query(
-        collection(db, 'samples'),
+    const snap   = await getDocs(
+      query(collection(db, 'samples'),
         where('currentStatus', 'in', [STATUS.RECEIVED, STATUS.WAITING, STATUS.TESTING])
       )
     );
@@ -326,14 +519,103 @@ export const sampleService = {
       .filter(s => s.updatedAt?.toDate() < cutoff);
   },
 
+  // Status bo'yicha umumiy statistika
   async getStats() {
     const snap = await getDocs(collection(db, 'samples'));
-    const all = snap.docs.map(d => d.data());
-    const stats = {};
+    const all  = snap.docs.map(d => d.data());
+    const stats = { total: all.length };
     Object.values(STATUS).forEach(s => { stats[s] = 0; });
     all.forEach(s => { if (stats[s.currentStatus] !== undefined) stats[s.currentStatus]++; });
-    stats.total = all.length;
+    const compliant    = stats[STATUS.COMPLIANT] + stats[STATUS.COMPLETED];
+    const nonCompliant = stats[STATUS.NON_COMPLIANT];
+    const processed    = compliant + nonCompliant;
+    stats.complianceRate = processed > 0 ? Math.round((compliant / processed) * 100) : 0;
+    stats.activeCount    = (stats[STATUS.RECEIVED] || 0) + (stats[STATUS.WAITING] || 0) + (stats[STATUS.TESTING] || 0);
     return stats;
+  },
+
+  // Oylik trend (so'nggi N oy)
+  async getMonthlyTrend(months = 6) {
+    const result = [];
+    const now    = new Date();
+    for (let i = months - 1; i >= 0; i--) {
+      const d     = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const from  = Timestamp.fromDate(d);
+      const toD   = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+      const to    = Timestamp.fromDate(toD);
+      const snap  = await getDocs(
+        query(collection(db, 'samples'),
+          where('createdAt', '>=', from),
+          where('createdAt', '<=', to)
+        )
+      );
+      const all = snap.docs.map(d => d.data());
+      result.push({
+        month:    d.toLocaleString('uz-UZ', { month: 'short', year: '2-digit' }),
+        total:    all.length,
+        compliant:    all.filter(s => s.currentStatus === STATUS.COMPLIANT || s.currentStatus === STATUS.COMPLETED).length,
+        nonCompliant: all.filter(s => s.currentStatus === STATUS.NON_COMPLIANT).length,
+        active:       all.filter(s => [STATUS.RECEIVED, STATUS.WAITING, STATUS.TESTING].includes(s.currentStatus)).length,
+      });
+    }
+    return result;
+  },
+
+  // Har bir laboratoriya bo'yicha namuna hisoboti
+  async getReportByLab() {
+    const [labs, samplesSnap] = await Promise.all([
+      labService.getAll(),
+      getDocs(collection(db, 'samples')),
+    ]);
+    const all = samplesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return labs.map(lab => {
+      const labSamples = all.filter(s => s.currentLabId === lab.id || s.labsVisited?.includes(lab.id));
+      const current    = all.filter(s => s.currentLabId === lab.id);
+      const compliant  = current.filter(s => s.currentStatus === STATUS.COMPLIANT || s.currentStatus === STATUS.COMPLETED).length;
+      const nonCompliant = current.filter(s => s.currentStatus === STATUS.NON_COMPLIANT).length;
+      const processed  = compliant + nonCompliant;
+      return {
+        ...lab,
+        totalVisited:    labSamples.length,
+        currentCount:    current.length,
+        compliant,
+        nonCompliant,
+        active:          current.filter(s => [STATUS.RECEIVED, STATUS.WAITING, STATUS.TESTING].includes(s.currentStatus)).length,
+        complianceRate:  processed > 0 ? Math.round((compliant / processed) * 100) : 0,
+        loadPct:         Math.min(100, Math.round(((lab.currentLoad || 0) / (lab.capacity || 50)) * 100)),
+      };
+    });
+  },
+
+  // Mahsulot turi bo'yicha hisobot
+  async getReportByProductType() {
+    const snap = await getDocs(collection(db, 'samples'));
+    const all  = snap.docs.map(d => d.data());
+    const map  = {};
+    all.forEach(s => {
+      const key = s.productType || 'Boshqa';
+      if (!map[key]) map[key] = { type: key, total: 0, compliant: 0, nonCompliant: 0 };
+      map[key].total++;
+      if (s.currentStatus === STATUS.COMPLIANT || s.currentStatus === STATUS.COMPLETED) map[key].compliant++;
+      if (s.currentStatus === STATUS.NON_COMPLIANT) map[key].nonCompliant++;
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  },
+
+  // Top ariza beruvchilar
+  async getTopApplicants(limitN = 10) {
+    const snap = await getDocs(collection(db, 'samples'));
+    const all  = snap.docs.map(d => d.data());
+    const map  = {};
+    all.forEach(s => {
+      const key = s.applicantName || 'Noma\'lum';
+      if (!map[key]) map[key] = { name: key, total: 0, compliant: 0 };
+      map[key].total++;
+      if (s.currentStatus === STATUS.COMPLIANT || s.currentStatus === STATUS.COMPLETED) map[key].compliant++;
+    });
+    return Object.values(map)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, limitN);
   },
 };
 
@@ -350,8 +632,7 @@ export const historyService = {
 
   async getBySample(sampleId) {
     const snap = await getDocs(
-      query(
-        collection(db, 'sampleHistory'),
+      query(collection(db, 'sampleHistory'),
         where('sampleId', '==', sampleId),
         orderBy('timestamp', 'asc')
       )
@@ -361,8 +642,7 @@ export const historyService = {
 
   async getByLab(labId, limitCount = 50) {
     const snap = await getDocs(
-      query(
-        collection(db, 'sampleHistory'),
+      query(collection(db, 'sampleHistory'),
         where('labId', '==', labId),
         orderBy('timestamp', 'desc'),
         limit(limitCount)
@@ -371,10 +651,48 @@ export const historyService = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
+  async getByEmployee(employeeId, limitCount = 50) {
+    const snap = await getDocs(
+      query(collection(db, 'sampleHistory'),
+        where('employeeId', '==', employeeId),
+        orderBy('timestamp', 'desc'),
+        limit(limitCount)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  // Foydalanuvchi faoliyat logi
+  async getActivityLog(limitCount = 100) {
+    const snap = await getDocs(
+      query(collection(db, 'sampleHistory'),
+        orderBy('timestamp', 'desc'),
+        limit(limitCount)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  // Xodim samaradorligi (kim nechta namuna ishlagan)
+  async getEmployeeStats() {
+    const snap = await getDocs(
+      query(collection(db, 'sampleHistory'), orderBy('timestamp', 'desc'))
+    );
+    const all = snap.docs.map(d => d.data());
+    const map = {};
+    all.forEach(h => {
+      if (!h.employeeId) return;
+      if (!map[h.employeeId]) map[h.employeeId] = { employeeId: h.employeeId, actions: 0, transfers: 0, lastAction: null };
+      map[h.employeeId].actions++;
+      if (h.isTransfer) map[h.employeeId].transfers++;
+      if (!map[h.employeeId].lastAction) map[h.employeeId].lastAction = h.timestamp;
+    });
+    return Object.values(map).sort((a, b) => b.actions - a.actions);
+  },
+
   subscribeToRecent(cb, limitCount = 20) {
     return onSnapshot(
-      query(
-        collection(db, 'sampleHistory'),
+      query(collection(db, 'sampleHistory'),
         orderBy('timestamp', 'desc'),
         limit(limitCount)
       ),
@@ -390,14 +708,48 @@ export const alertService = {
   async create(data) {
     return addDoc(collection(db, 'alerts'), {
       ...data,
-      isRead: false,
+      isRead:    false,
       createdAt: serverTimestamp(),
     });
   },
 
-  async getAll() {
+  // Maxsus ogohlantirish (tizim tomonidan)
+  async createSystem({ type, message, severity = 'info' }) {
+    return addDoc(collection(db, 'alerts'), {
+      type, message, severity,
+      isRead:     false,
+      isSystem:   true,
+      createdAt:  serverTimestamp(),
+    });
+  },
+
+  async getAll(limitCount = 100) {
     const snap = await getDocs(
-      query(collection(db, 'alerts'), orderBy('createdAt', 'desc'), limit(50))
+      query(collection(db, 'alerts'),
+        orderBy('createdAt', 'desc'),
+        limit(limitCount)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async getUnread() {
+    const snap = await getDocs(
+      query(collection(db, 'alerts'),
+        where('isRead', '==', false),
+        orderBy('createdAt', 'desc')
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async getByCritical() {
+    const snap = await getDocs(
+      query(collection(db, 'alerts'),
+        where('type', '==', 'critical'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      )
     );
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
@@ -407,20 +759,53 @@ export const alertService = {
   },
 
   async markAllRead() {
-    const snap = await getDocs(
+    const snap   = await getDocs(
       query(collection(db, 'alerts'), where('isRead', '==', false))
     );
     const updates = snap.docs.map(d => updateDoc(d.ref, { isRead: true }));
     await Promise.all(updates);
   },
 
+  async delete(id) {
+    await deleteDoc(doc(db, 'alerts', id));
+  },
+
+  async deleteAllRead() {
+    const snap = await getDocs(
+      query(collection(db, 'alerts'), where('isRead', '==', true))
+    );
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+  },
+
+  // Ogohlantirishlar statistikasi
+  async getStats() {
+    const snap = await getDocs(collection(db, 'alerts'));
+    const all  = snap.docs.map(d => d.data());
+    return {
+      total:    all.length,
+      unread:   all.filter(a => !a.isRead).length,
+      critical: all.filter(a => a.type === 'critical').length,
+      warning:  all.filter(a => a.type === 'warning').length,
+      info:     all.filter(a => a.type === 'info').length,
+    };
+  },
+
   subscribeToUnread(cb) {
     return onSnapshot(
-      query(
-        collection(db, 'alerts'),
+      query(collection(db, 'alerts'),
         where('isRead', '==', false),
         orderBy('createdAt', 'desc'),
         limit(20)
+      ),
+      snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+  },
+
+  subscribeToAll(cb, limitCount = 50) {
+    return onSnapshot(
+      query(collection(db, 'alerts'),
+        orderBy('createdAt', 'desc'),
+        limit(limitCount)
       ),
       snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
@@ -431,16 +816,76 @@ export const alertService = {
 // ADMIN SERVICE
 // ═══════════════════════════════════════════════════════════════
 export const adminService = {
+  // Umumiy dashboard statistikasi
   async getStats() {
-    const [samplesStats, labsSnap, usersSnap] = await Promise.all([
+    const [samplesStats, labsSnap, usersSnap, alertsStats] = await Promise.all([
       sampleService.getStats(),
       labService.getAll(),
       userService.getAll(),
+      alertService.getStats(),
     ]);
+    const activeLabs    = labsSnap.filter(l => l.isActive !== false).length;
+    const overdueCount  = (await sampleService.getOverdue(48)).length;
     return {
       ...samplesStats,
-      totalLabs:  labsSnap.length,
-      totalUsers: usersSnap.length,
+      totalLabs:     labsSnap.length,
+      activeLabs,
+      totalUsers:    usersSnap.length,
+      activeUsers:   usersSnap.filter(u => u.isActive !== false).length,
+      overdueCount,
+      criticalAlerts: alertsStats.critical,
+      unreadAlerts:   alertsStats.unread,
+    };
+  },
+
+  // To'liq tizim hisoboti
+  async getFullReport() {
+    const [
+      stats,
+      trend,
+      byLab,
+      byProduct,
+      topApplicants,
+      overdueList,
+      employeeStats,
+    ] = await Promise.all([
+      adminService.getStats(),
+      sampleService.getMonthlyTrend(6),
+      sampleService.getReportByLab(),
+      sampleService.getReportByProductType(),
+      sampleService.getTopApplicants(10),
+      sampleService.getOverdue(48),
+      historyService.getEmployeeStats(),
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      stats,
+      trend,
+      byLab,
+      byProduct,
+      topApplicants,
+      overdueList,
+      employeeStats,
+    };
+  },
+
+  // Tizim salomatlik tekshiruvi
+  async getSystemHealth() {
+    const [overdueList, alertsStats, labsReport] = await Promise.all([
+      sampleService.getOverdue(48),
+      alertService.getStats(),
+      labService.getLoadReport(),
+    ]);
+    const overloadedLabs = labsReport.filter(l => l.loadPct >= 90);
+    return {
+      overdueCount:    overdueList.length,
+      criticalAlerts:  alertsStats.critical,
+      unreadAlerts:    alertsStats.unread,
+      overloadedLabs:  overloadedLabs.length,
+      overloadedLabNames: overloadedLabs.map(l => l.name),
+      status: overdueList.length > 5 || overloadedLabs.length > 0 || alertsStats.critical > 0
+        ? 'warning'
+        : 'healthy',
     };
   },
 };
