@@ -1,7 +1,7 @@
 {
   "name": "namuna-kuzatuv",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,10 +12,9 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "firebase": "^12.12.0",
-    "lucide-react": "^1.8.0",
+    "lucide-react": "^0.383.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-hot-toast": "^2.6.0",
     "react-router-dom": "^6.30.3",
     "tailwind-merge": "^3.5.0"
   },

@@ -27,27 +27,35 @@ function AdminRoute({ children }) {
 }
 
 function AppRoutes() {
-  const { user, authLoading, toasts } = useApp();
+  const { user, authLoading, toasts, dismissToast } = useApp();
 
   if (authLoading) return <LoadingPage text="Tizim yuklanmoqda..." />;
 
   return (
     <>
+      {/* Sidebar (desktop) + top bar (mobile) + bottom nav (mobile) */}
       <Navbar />
-      <main className={user ? 'pt-16' : ''}>
+
+      {/* Main content area — offset for sidebar on desktop, top bar on mobile */}
+      <main className={user
+        ? 'lg:ml-60 min-h-screen pt-0 lg:pt-0 mt-14 lg:mt-0'
+        : ''
+      }>
         <Routes>
-          <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
-          <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+          <Route path="/auth"    element={user ? <Navigate to="/" replace /> : <AuthPage />} />
+          <Route path="/"        element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/samples" element={<ProtectedRoute><SamplesPage /></ProtectedRoute>} />
-          <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
-          <Route path="/labs" element={<ProtectedRoute><LabsPage /></ProtectedRoute>} />
-          <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
+          <Route path="/scan"    element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
+          <Route path="/labs"    element={<ProtectedRoute><LabsPage /></ProtectedRoute>} />
+          <Route path="/alerts"  element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-          <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/admin"   element={<AdminRoute><AdminPage /></AdminRoute>} />
+          <Route path="*"        element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <ToastContainer toasts={toasts} />
+
+      {/* Global toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

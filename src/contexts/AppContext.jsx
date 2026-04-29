@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { authService, userService, alertService } from '../lib/firebase.js';
 
 const AppContext = createContext(null);
@@ -9,6 +9,7 @@ export function AppProvider({ children }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [toasts, setToasts]           = useState([]);
   const [unreadAlerts, setUnreadAlerts] = useState([]);
+  const toastCounter = useRef(0);
 
   // Auth listener
   useEffect(() => {
@@ -27,8 +28,7 @@ export function AppProvider({ children }) {
           });
           profile = await userService.getProfile(firebaseUser.uid);
         }
-        // photoURL ni yangilab saqlaymiz (Google profile rasm o'zgarganda)
-        if (firebaseUser.photoURL && profile.photoURL !== firebaseUser.photoURL) {
+        if (firebaseUser.photoURL && profile?.photoURL !== firebaseUser.photoURL) {
           await userService.updateProfile(firebaseUser.uid, { photoURL: firebaseUser.photoURL });
           profile = { ...profile, photoURL: firebaseUser.photoURL };
         }
@@ -41,17 +41,26 @@ export function AppProvider({ children }) {
     return unsub;
   }, []);
 
-  // Unread alerts
+  // Unread alerts subscription
   useEffect(() => {
     if (!user) { setUnreadAlerts([]); return; }
     const unsub = alertService.subscribeToUnread(setUnreadAlerts);
     return unsub;
   }, [user]);
 
+  // Toast with deduplication
   const showToast = useCallback((msg, type = 'info') => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, msg, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+    const id = ++toastCounter.current;
+    setToasts(prev => {
+      // Avoid duplicate consecutive toasts
+      if (prev.length && prev[prev.length - 1].msg === msg) return prev;
+      return [...prev, { id, msg, type }];
+    });
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -77,7 +86,7 @@ export function AppProvider({ children }) {
       user, userProfile, authLoading,
       toasts, unreadAlerts,
       isSuperAdmin, isLabManager, isTechnician, canEdit, canScan,
-      showToast, logout, refreshProfile,
+      showToast, dismissToast, logout, refreshProfile,
     }}>
       {children}
     </AppContext.Provider>

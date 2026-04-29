@@ -1,40 +1,51 @@
 import { useState, useEffect } from 'react';
 import { alertService } from '../lib/firebase.js';
-import { Button, Card, EmptyState, Spinner, SectionHeader } from '../components/ui/index.jsx';
+import {
+  Button, Card, EmptyState, Spinner, SectionHeader, FilterChip,
+} from '../components/ui/index.jsx';
 import { useApp } from '../contexts/AppContext.jsx';
 import { timeSince } from '../lib/utils.js';
+import { cn } from '../lib/utils.js';
+import {
+  Bell, CheckCheck, Trash2, AlertTriangle, Info, ShieldAlert,
+} from 'lucide-react';
 
-const ALERT_STYLES = {
+const ALERT_CONFIG = {
   critical: {
     bg:    'bg-red-50 border-red-200',
     badge: 'bg-red-100 text-red-700',
+    dot:   'bg-red-500',
+    icon:  ShieldAlert,
+    color: 'text-red-600',
     label: 'Kritik',
-    img:   'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=48&h=48&q=80&fit=crop',
   },
   warning: {
     bg:    'bg-amber-50 border-amber-200',
     badge: 'bg-amber-100 text-amber-700',
+    dot:   'bg-amber-500',
+    icon:  AlertTriangle,
+    color: 'text-amber-600',
     label: 'Ogohlantirish',
-    img:   'https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=48&h=48&q=80&fit=crop',
   },
   info: {
     bg:    'bg-blue-50 border-blue-200',
     badge: 'bg-blue-100 text-blue-700',
+    dot:   'bg-blue-500',
+    icon:  Info,
+    color: 'text-blue-600',
     label: "Ma'lumot",
-    img:   'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=48&h=48&q=80&fit=crop',
   },
 };
 
 export default function AlertsPage() {
   const { showToast } = useApp();
-  const [alerts, setAlerts]     = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [marking, setMarking]   = useState(false);
+  const [alerts,   setAlerts]   = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [marking,  setMarking]  = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [filter, setFilter]     = useState('all'); // 'all' | 'unread' | 'critical'
+  const [filter,   setFilter]   = useState('all');
 
   useEffect(() => {
-    // Real-time subscription
     const unsub = alertService.subscribeToAll(data => {
       setAlerts(data);
       setLoading(false);
@@ -42,22 +53,21 @@ export default function AlertsPage() {
     return unsub;
   }, []);
 
-  const handleMarkRead = async (id) => {
-    await alertService.markRead(id);
-  };
-
+  const handleMarkRead    = id  => alertService.markRead(id);
   const handleMarkAllRead = async () => {
     setMarking(true);
     await alertService.markAllRead();
-    showToast("Barcha ogohlantirishlar o'qildi ✅", 'success');
+    showToast("Barcha ogohlantirishlar o'qildi", 'success');
     setMarking(false);
   };
-
-  const handleDeleteRead = async () => {
+  const handleDeleteRead  = async () => {
     setDeleting(true);
     await alertService.deleteAllRead();
     showToast("O'qilganlar o'chirildi", 'success');
     setDeleting(false);
+  };
+  const handleDelete      = async id => {
+    await alertService.delete(id);
   };
 
   const filtered = alerts.filter(a => {
@@ -69,23 +79,27 @@ export default function AlertsPage() {
   const unreadCount   = alerts.filter(a => !a.isRead).length;
   const criticalCount = alerts.filter(a => a.type === 'critical').length;
 
-  if (loading) return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
+  if (loading) return (
+    <div className="flex justify-center items-center min-h-[60vh]"><Spinner size="lg" /></div>
+  );
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <SectionHeader
-        title="🔔 Ogohlantirishlar"
+        icon="🔔"
+        title="Ogohlantirishlar"
         subtitle={unreadCount > 0 ? `${unreadCount} ta o'qilmagan` : "Hammasi o'qilgan"}
-        img="https://images.unsplash.com/photo-1531347669012-4b3f93b1b9b3?w=40&h=40&q=80&fit=crop"
         action={
           <div className="flex gap-2">
             {unreadCount > 0 && (
-              <Button variant="secondary" onClick={handleMarkAllRead} loading={marking} size="sm">
-                ✅ Barchasini o'qildi
+              <Button variant="secondary" size="sm" onClick={handleMarkAllRead} loading={marking}
+                icon={<CheckCheck className="w-4 h-4" />}>
+                Barchasini o'qildi
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={handleDeleteRead} loading={deleting}>
-              🗑 O'qilganlarni tozalash
+            <Button variant="ghost" size="sm" onClick={handleDeleteRead} loading={deleting}
+              icon={<Trash2 className="w-4 h-4" />}>
+              Tozalash
             </Button>
           </div>
         }
@@ -93,61 +107,78 @@ export default function AlertsPage() {
 
       {/* Filter chips */}
       <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
-        {[
-          { id: 'all',      label: `Barchasi (${alerts.length})` },
-          { id: 'unread',   label: `O'qilmagan (${unreadCount})` },
-          { id: 'critical', label: `Kritik (${criticalCount})` },
-        ].map(f => (
-          <button key={f.id} onClick={() => setFilter(f.id)}
-            className={`px-3 py-1.5 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-              filter === f.id
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}>
-            {f.label}
-          </button>
-        ))}
+        <FilterChip active={filter === 'all'}      onClick={() => setFilter('all')}      count={alerts.length}>Barchasi</FilterChip>
+        <FilterChip active={filter === 'unread'}   onClick={() => setFilter('unread')}   count={unreadCount}>O'qilmagan</FilterChip>
+        <FilterChip active={filter === 'critical'} onClick={() => setFilter('critical')} count={criticalCount}>Kritik</FilterChip>
       </div>
 
+      {/* Alerts list */}
       {filtered.length === 0 ? (
         <EmptyState
-          img="https://images.unsplash.com/photo-1531347669012-4b3f93b1b9b3?w=80&h=80&q=80&fit=crop"
+          icon="🔔"
           title="Ogohlantirishlar yo'q"
-          subtitle="Hozircha hech qanday ogohlantirish yo'q"
+          subtitle={filter !== 'all' ? 'Bu filtr bo\'yicha hech narsa topilmadi' : "Hozircha hech qanday ogohlantirish yo'q"}
         />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filtered.map(alert => {
-            const style = ALERT_STYLES[alert.type] || ALERT_STYLES.info;
+            const c   = ALERT_CONFIG[alert.type] || ALERT_CONFIG.info;
+            const Icon = c.icon;
             return (
-              <Card key={alert.id}
-                className={`p-4 border ${style.bg} ${alert.isRead ? 'opacity-60' : ''} transition-all`}>
-                <div className="flex items-start gap-3">
-                  <img src={style.img} alt={style.label}
-                    className={`w-12 h-12 rounded-xl object-cover flex-shrink-0 ${alert.isRead ? 'grayscale' : ''}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2 flex-wrap mb-1">
-                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-lg ${style.badge}`}>
-                        {style.label}
+              <div
+                key={alert.id}
+                className={cn(
+                  'relative flex items-start gap-3.5 px-4 py-3.5 rounded-xl border transition-all',
+                  c.bg,
+                  !alert.isRead ? 'shadow-sm' : 'opacity-70'
+                )}
+              >
+                {/* Unread dot */}
+                {!alert.isRead && (
+                  <div className={cn('absolute top-3.5 right-3.5 w-2 h-2 rounded-full flex-shrink-0', c.dot)} />
+                )}
+
+                {/* Icon */}
+                <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5', alert.type === 'critical' ? 'bg-red-100' : alert.type === 'warning' ? 'bg-amber-100' : 'bg-blue-100')}>
+                  <Icon className={cn('w-4 h-4', c.color)} />
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0 pr-6">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', c.badge)}>
+                      {c.label}
+                    </span>
+                    {alert.barcode && (
+                      <span className="font-mono text-xs font-bold text-slate-700 bg-white/60 px-2 py-0.5 rounded-md">
+                        {alert.barcode}
                       </span>
-                      <p className="text-xs text-slate-400 flex-shrink-0">{timeSince(alert.createdAt)}</p>
-                    </div>
-                    <p className="font-semibold text-slate-800 text-sm">{alert.message}</p>
-                    {alert.productName && (
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        📦 {alert.productName}
-                        {alert.barcode && <span className="ml-1 font-mono">({alert.barcode})</span>}
-                      </p>
-                    )}
-                    {!alert.isRead && (
-                      <button onClick={() => handleMarkRead(alert.id)}
-                        className="text-xs font-semibold text-blue-600 hover:underline mt-2 block">
-                        O'qildi deb belgilash →
-                      </button>
                     )}
                   </div>
+                  <p className="text-sm font-medium text-slate-800 leading-relaxed">{alert.message}</p>
+                  <p className="text-xs text-slate-500 mt-1">{timeSince(alert.createdAt)}</p>
                 </div>
-              </Card>
+
+                {/* Actions */}
+                <div className="absolute top-3 right-7 flex gap-1">
+                  {!alert.isRead && (
+                    <button
+                      onClick={() => handleMarkRead(alert.id)}
+                      className="p-1.5 rounded-lg hover:bg-white/70 text-slate-500 hover:text-slate-700 transition-all"
+                      title="O'qildi deb belgilash"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDelete(alert.id)}
+                    className="p-1.5 rounded-lg hover:bg-white/70 text-slate-400 hover:text-red-600 transition-all"
+                    title="O'chirish"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>

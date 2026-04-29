@@ -2,27 +2,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
-    function isAuth() {
-      return request.auth != null;
-    }
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    function hasRole(role) {
-      return isAuth() && getUserData().role == role;
-    }
-    function isSuperAdmin() {
-      return hasRole('super_admin');
-    }
-    function isLabManager() {
-      return hasRole('lab_manager') || isSuperAdmin();
-    }
-    function isTechnician() {
-      return hasRole('technician') || isLabManager();
-    }
+    function isAuth() { return request.auth != null; }
+    function getUserData() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function hasRole(role) { return isAuth() && getUserData().role == role; }
+    function isSuperAdmin() { return hasRole('super_admin'); }
+    function isLabManager() { return hasRole('lab_manager') || isSuperAdmin(); }
+    function isTechnician() { return hasRole('technician') || isLabManager(); }
 
-    // ─── Users ──────────────────────────────────────────────
     match /users/{userId} {
       allow read: if isAuth();
       allow create: if isAuth() && request.auth.uid == userId;
@@ -30,13 +16,11 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // ─── Laboratories ────────────────────────────────────────
     match /laboratories/{labId} {
       allow read: if isAuth();
       allow write: if isSuperAdmin();
     }
 
-    // ─── Samples ────────────────────────────────────────────
     match /samples/{sampleId} {
       allow read: if isAuth();
       allow create: if isTechnician();
@@ -44,18 +28,16 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // ─── Sample History ─────────────────────────────────────
     match /sampleHistory/{histId} {
       allow read: if isAuth();
       allow create: if isTechnician();
       allow update, delete: if isSuperAdmin();
     }
 
-    // ─── Alerts ─────────────────────────────────────────────
     match /alerts/{alertId} {
       allow read: if isAuth();
       allow create: if isTechnician();
-      allow update: if isAuth(); // mark as read
+      allow update: if isAuth();
       allow delete: if isSuperAdmin();
     }
   }
