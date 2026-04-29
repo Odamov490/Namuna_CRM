@@ -4,7 +4,7 @@ import { authService } from '../lib/firebase.js';
 import { Button, Input, AlertBanner } from '../components/ui/index.jsx';
 import { useApp } from '../contexts/AppContext.jsx';
 import { firebaseErrorMsg } from '../lib/utils.js';
-import { Eye, EyeOff, Microscope, ArrowLeft, Mail } from 'lucide-react';
+import { Eye, EyeOff, Beaker, ArrowLeft, Mail } from 'lucide-react';
 
 function GoogleIcon() {
   return (
@@ -126,7 +126,7 @@ export default function AuthPage() {
         {/* Logo */}
         <div className="relative z-10 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/20">
-            <Microscope className="w-5 h-5 text-white" />
+            <Beaker className="w-5 h-5 text-white" />
           </div>
           <div>
             <p className="text-white font-black text-lg leading-none">NamunaKuzatuv</p>
@@ -180,7 +180,7 @@ export default function AuthPage() {
           {/* Mobile logo */}
           <div className="lg:hidden text-center mb-8">
             <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-3 shadow-lg">
-              <Microscope className="w-7 h-7 text-white" />
+              <Beaker className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-2xl font-black text-slate-900">NamunaKuzatuv</h1>
             <p className="text-slate-500 text-sm mt-1">Laboratoriya namuna boshqaruv tizimi</p>

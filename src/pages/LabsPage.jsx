@@ -9,7 +9,7 @@ import { useApp } from '../contexts/AppContext.jsx';
 import SampleCard from '../components/samples/SampleCard.jsx';
 import SampleDetail from '../components/samples/SampleDetail.jsx';
 import { cn, getLoadPercent } from '../lib/utils.js';
-import { Plus, Pencil, Trash2, Building2, FlaskConical, Package } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, FlaskConical } from 'lucide-react';
 
 export default function LabsPage() {
   const { isSuperAdmin, showToast } = useApp();

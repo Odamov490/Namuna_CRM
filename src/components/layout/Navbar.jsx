@@ -5,8 +5,8 @@ import { Avatar } from '../ui/index.jsx';
 import { cn } from '../../lib/utils.js';
 import {
   LayoutDashboard, FlaskConical, ScanLine, Building2,
-  Bell, ShieldCog, User, LogOut, ChevronDown, Menu, X,
-  Microscope,
+  Bell, Settings2, User, LogOut, ChevronDown, Menu, X,
+  Beaker,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -15,7 +15,7 @@ const NAV_ITEMS = [
   { path: '/scan',    label: 'Skaner',            icon: ScanLine,        role: 'canScan' },
   { path: '/labs',    label: 'Laboratoriyalar',   icon: Building2,       role: null },
   { path: '/alerts',  label: 'Ogohlantirishlar',  icon: Bell,            role: null },
-  { path: '/admin',   label: 'Boshqaruv',         icon: ShieldCog,       role: 'isSuperAdmin' },
+  { path: '/admin',   label: 'Boshqaruv',         icon: Settings2,       role: 'isSuperAdmin' },
 ];
 
 const ROLE_LABELS = {
@@ -66,7 +66,7 @@ export default function Navbar() {
         <div className="h-16 flex items-center px-5 border-b border-slate-100 flex-shrink-0">
           <NavLink to="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <Microscope className="w-5 h-5 text-white" />
+              <Beaker className="w-5 h-5 text-white" />
             </div>
             <div>
               <p className="font-black text-slate-900 text-sm leading-none">NamunaKuzatuv</p>
@@ -141,7 +141,7 @@ export default function Navbar() {
         </button>
         <div className="flex items-center gap-2 flex-1">
           <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Microscope className="w-4 h-4 text-white" />
+            <Beaker className="w-4 h-4 text-white" />
           </div>
           <span className="font-black text-slate-900 text-sm">NamunaKuzatuv</span>
         </div>
