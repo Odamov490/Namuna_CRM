@@ -1,15 +1,16 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { useState, useRef, useEffect } from 'react';
 import { sampleService, labService, STATUS_LABELS } from '../lib/firebase.js';
-import { Button, Input, Select, Textarea, Card, AlertBanner } from '../components/ui/index.jsx';
+import {
+  Button, Input, Select, Textarea, Card, AlertBanner,
+} from '../components/ui/index.jsx';
 import StatusBadge from '../components/samples/StatusBadge.jsx';
 import SampleDetail from '../components/samples/SampleDetail.jsx';
 import { useApp } from '../contexts/AppContext.jsx';
 import { formatDate } from '../lib/utils.js';
 import { cn } from '../lib/utils.js';
 import {
-  ScanLine, Search, Building2, User, Calendar,
-  ArrowRight, CheckCircle2, Camera, CameraOff, Keyboard,
+  ScanLine, Search, Loader2, Building2, User, Calendar,
+  ArrowRight, CheckCircle2,
 } from 'lucide-react';
 
 const STATUS_TRANSITIONS = {
@@ -24,66 +25,41 @@ const STATUS_TRANSITIONS = {
 
 export default function ScanPage() {
   const { user, canScan, showToast } = useApp();
-  const [mode,          setMode]          = useState('camera');
-  const [barcode,       setBarcode]       = useState('');
-  const [sample,        setSample]        = useState(null);
-  const [labs,          setLabs]          = useState([]);
-  const [searching,     setSearching]     = useState(false);
-  const [saving,        setSaving]        = useState(false);
-  const [detailOpen,    setDetailOpen]    = useState(false);
-  const [quickStatus,   setQuickStatus]   = useState('');
-  const [quickNote,     setQuickNote]     = useState('');
+  const [barcode,      setBarcode]      = useState('');
+  const [sample,       setSample]       = useState(null);
+  const [labs,         setLabs]         = useState([]);
+  const [searching,    setSearching]    = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [detailOpen,   setDetailOpen]   = useState(false);
+  const [quickStatus,  setQuickStatus]  = useState('');
+  const [quickNote,    setQuickNote]    = useState('');
   const [transferLabId, setTransferLabId] = useState('');
-  const [scanError,     setScanError]     = useState('');
-  const [cameraActive,  setCameraActive]  = useState(false);
-  const [cameraError,   setCameraError]   = useState('');
-
-  const scannerRef = useRef(null);
-  const inputRef   = useRef();
-  const SCANNER_ID = 'html5qr-region';
+  const [scanError,    setScanError]    = useState('');
+  const inputRef = useRef();
 
   useEffect(() => {
     labService.getAll().then(setLabs);
-    return () => { if (scannerRef.current) scannerRef.current.clear().catch(() => {}); };
+    setTimeout(() => inputRef.current?.focus(), 200);
   }, []);
 
-  const stopCamera = useCallback(() => {
-    if (scannerRef.current) { scannerRef.current.clear().catch(() => {}); scannerRef.current = null; }
-    setCameraActive(false);
-  }, []);
-
-  const startCamera = useCallback(() => {
-    setCameraError('');
-    setCameraActive(true);
-    setTimeout(() => {
-      try {
-        if (scannerRef.current) { scannerRef.current.clear().catch(() => {}); }
-        const scanner = new Html5QrcodeScanner(
-          SCANNER_ID,
-          { fps: 10, qrbox: { width: 240, height: 240 }, aspectRatio: 1.5, showTorchButtonIfSupported: true,
-            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39] },
-          false
-        );
-        scanner.render(
-          (text) => { scanner.clear().catch(() => {}); scannerRef.current = null; setCameraActive(false); handleBarcodeFound(text.trim()); },
-          () => {}
-        );
-        scannerRef.current = scanner;
-      } catch (e) {
-        setCameraError("Kamera ochib bo'lmadi. Brauzer ruxsatini tekshiring.");
-        setCameraActive(false);
-      }
-    }, 150);
-  }, []);
-
-  const handleBarcodeFound = async (code) => {
-    const upper = code.toUpperCase();
-    setBarcode(upper); setSample(null); setScanError(''); setSearching(true);
+  const handleScan = async () => {
+    if (!barcode.trim()) return;
+    setSearching(true);
+    setSample(null);
+    setScanError('');
     try {
-      const s = await sampleService.getByBarcode(upper);
-      if (!s) { setScanError(`"${upper}" barcode bilan namuna topilmadi`); }
-      else { setSample(s); setQuickStatus(''); setQuickNote(''); setTransferLabId(''); showToast('Namuna topildi ✅', 'success'); }
-    } catch (e) { setScanError(e.message); }
+      const s = await sampleService.getByBarcode(barcode.trim());
+      if (!s) {
+        setScanError(`"${barcode}" barcode bilan namuna topilmadi`);
+      } else {
+        setSample(s);
+        setQuickStatus('');
+        setQuickNote('');
+        setTransferLabId('');
+      }
+    } catch (e) {
+      setScanError(e.message);
+    }
     setSearching(false);
   };
 
@@ -91,124 +67,191 @@ export default function ScanPage() {
     if (!quickStatus && !transferLabId) return;
     setSaving(true);
     try {
-      if (transferLabId) { await sampleService.transfer(sample.id, transferLabId, user.uid, quickNote); showToast("Ko'chirildi ✅", 'success'); }
-      else { await sampleService.updateStatus(sample.id, quickStatus, user.uid, sample.currentLabId, quickNote); showToast('Status yangilandi ✅', 'success'); }
+      if (transferLabId) {
+        await sampleService.transfer(sample.id, transferLabId, user.uid, quickNote);
+        showToast("Ko'chirildi ✅", 'success');
+      } else {
+        await sampleService.updateStatus(sample.id, quickStatus, user.uid, sample.currentLabId, quickNote);
+        showToast('Status yangilandi ✅', 'success');
+      }
       const updated = await sampleService.get(sample.id);
-      setSample(updated); setQuickStatus(''); setQuickNote(''); setTransferLabId('');
-    } catch (e) { showToast(e.message, 'error'); }
+      setSample(updated);
+      setQuickStatus('');
+      setQuickNote('');
+      setTransferLabId('');
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
     setSaving(false);
-  };
-
-  const resetScan = () => {
-    setSample(null); setBarcode(''); setScanError('');
-    if (mode === 'camera') startCamera();
-    else setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const nextStatuses = STATUS_TRANSITIONS[sample?.currentStatus] || [];
   const currentLab   = labs.find(l => l.id === sample?.currentLabId);
 
-  if (!canScan) return (
-    <div className="max-w-md mx-auto px-4 py-16 text-center">
-      <div className="text-6xl mb-4">🔒</div>
-      <h2 className="text-xl font-bold text-slate-700 mb-2">Ruxsat yo'q</h2>
-      <p className="text-slate-500">Skanerlash faqat Texnik va yuqori rollar uchun</p>
-    </div>
-  );
+  if (!canScan) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <div className="text-6xl mb-4">🔒</div>
+        <h2 className="text-xl font-bold text-slate-700 mb-2">Ruxsat yo'q</h2>
+        <p className="text-slate-500">Skanerlash funksiyasi faqat texniklar uchun mavjud</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-xl mx-auto px-4 py-6">
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-4">
           <ScanLine className="w-8 h-8 text-white" />
         </div>
         <h1 className="text-2xl font-black text-slate-900 mb-1">Barcode Skaner</h1>
-        <p className="text-slate-500 text-sm">Kamera yoki qo'lda barcode kiriting</p>
+        <p className="text-slate-500 text-sm">Barcode skanerlang yoki qo'lda kiriting</p>
       </div>
 
-      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5">
-        {[{ id:'camera', icon:<Camera className="w-4 h-4"/>, label:'Kamera' }, { id:'manual', icon:<Keyboard className="w-4 h-4"/>, label:"Qo'lda" }].map(t => (
-          <button key={t.id} onClick={() => { stopCamera(); setMode(t.id); if(t.id==='manual') setTimeout(()=>inputRef.current?.focus(),100); }}
-            className={cn('flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg transition-all', mode===t.id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Scan area */}
+      <Card className="p-6 mb-5">
+        {/* Animated scan frame */}
+        <div className="relative w-full aspect-video bg-slate-900 rounded-2xl overflow-hidden mb-5 flex items-center justify-center">
+          {/* Corner markers */}
+          {['tl', 'tr', 'bl', 'br'].map(pos => (
+            <div key={pos} className={cn(
+              'absolute w-6 h-6 border-blue-500 border-2',
+              pos === 'tl' ? 'top-3 left-3 border-r-0 border-b-0 rounded-tl-lg' :
+              pos === 'tr' ? 'top-3 right-3 border-l-0 border-b-0 rounded-tr-lg' :
+              pos === 'bl' ? 'bottom-3 left-3 border-r-0 border-t-0 rounded-bl-lg' :
+              'bottom-3 right-3 border-l-0 border-t-0 rounded-br-lg'
+            )} />
+          ))}
+          {/* Scan line */}
+          <div className="scan-line" />
+          <div className="text-center relative z-10">
+            <ScanLine className="w-12 h-12 text-blue-400 mx-auto mb-2 opacity-60" />
+            <p className="text-slate-400 text-sm">QR / Barcode kameraga ko'rsating</p>
+          </div>
+        </div>
 
-      <Card className="p-5 mb-5">
-        {mode === 'camera' && (
-          <>
-            <div id={SCANNER_ID} className={cn(!cameraActive && 'hidden')} />
-            {!cameraActive && (
-              <div className="flex flex-col items-center gap-4 py-8">
-                <div className="w-20 h-20 rounded-2xl bg-slate-100 flex items-center justify-center">
-                  <Camera className="w-10 h-10 text-slate-300" />
-                </div>
-                <div className="text-center">
-                  <p className="font-semibold text-slate-700">Kamerani yoqing</p>
-                  <p className="text-xs text-slate-400 mt-1">Brauzer ruxsat so'raganda "Allow" bosing</p>
-                </div>
-                {cameraError && <AlertBanner type="error" message={cameraError} />}
-                <Button onClick={startCamera} icon={<Camera className="w-4 h-4"/>}>Kamerani yoqish</Button>
-              </div>
-            )}
-            {cameraActive && (
-              <div className="mt-3 flex justify-center">
-                <Button variant="secondary" size="sm" onClick={stopCamera} icon={<CameraOff className="w-4 h-4"/>}>O'chirish</Button>
-              </div>
-            )}
-          </>
-        )}
+        {/* Manual input */}
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <Input
+              ref={inputRef}
+              value={barcode}
+              onChange={e => { setBarcode(e.target.value.toUpperCase()); setScanError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleScan()}
+              placeholder="Barcode kiriting (NK240001)"
+              className="font-mono tracking-widest"
+            />
+          </div>
+          <Button
+            onClick={handleScan}
+            loading={searching}
+            disabled={!barcode.trim()}
+            icon={<Search className="w-4 h-4" />}
+            className="flex-shrink-0"
+          >
+            Izlash
+          </Button>
+        </div>
 
-        {mode === 'manual' && (
-          <div className="flex gap-2" onKeyDown={e => e.key==='Enter' && barcode.trim() && handleBarcodeFound(barcode.trim())}>
-            <Input ref={inputRef} value={barcode} onChange={e=>{setBarcode(e.target.value.toUpperCase());setScanError('');}}
-              placeholder="NK2405001" className="font-mono tracking-widest flex-1" />
-            <Button onClick={()=>handleBarcodeFound(barcode.trim())} loading={searching} disabled={!barcode.trim()} icon={<Search className="w-4 h-4"/>} className="flex-shrink-0">
-              Izlash
-            </Button>
+        {scanError && (
+          <div className="mt-3">
+            <AlertBanner type="error" message={scanError} onDismiss={() => setScanError('')} />
           </div>
         )}
-
-        {scanError && <div className="mt-3"><AlertBanner type="error" message={scanError} onDismiss={()=>setScanError('')}/></div>}
-        {searching && <p className="text-center text-sm text-slate-400 mt-3 animate-pulse">Namuna izlanmoqda...</p>}
       </Card>
 
+      {/* Sample result */}
       {sample && (
         <div className="space-y-4 animate-fade-in">
+          {/* Sample info */}
           <Card className="p-5">
             <div className="flex items-start justify-between gap-3 mb-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
                   <span className="font-mono font-black text-slate-900">{sample.barcode}</span>
                   <StatusBadge status={sample.currentStatus} />
                 </div>
-                <h3 className="font-bold text-slate-800 truncate">{sample.productName}</h3>
+                <h3 className="font-bold text-slate-800">{sample.productName}</h3>
               </div>
-              <Button variant="secondary" size="sm" onClick={()=>setDetailOpen(true)}>Batafsil</Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setDetailOpen(true)}
+              >
+                Batafsil
+              </Button>
             </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-sm text-slate-600"><User className="w-3.5 h-3.5 text-slate-400"/>{sample.applicantName}{sample.applicantPhone&&<span className="text-slate-400 text-xs">· {sample.applicantPhone}</span>}</div>
-              {currentLab && <div className="flex items-center gap-2 text-sm text-slate-600"><Building2 className="w-3.5 h-3.5 text-slate-400"/>{currentLab.name}</div>}
-              <div className="flex items-center gap-2 text-xs text-slate-400"><Calendar className="w-3.5 h-3.5"/>{formatDate(sample.createdAt)}</div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="flex items-center gap-2 text-slate-600">
+                <User className="w-3.5 h-3.5 text-slate-400" />
+                {sample.applicantName}
+              </div>
+              {currentLab && (
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                  {currentLab.name}
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-slate-500 text-xs">
+                <Calendar className="w-3.5 h-3.5" />
+                {formatDate(sample.createdAt)}
+              </div>
             </div>
           </Card>
 
+          {/* Quick actions */}
           {nextStatuses.length > 0 && (
             <Card className="p-5">
-              <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-blue-600"/>Tezkor yangilash</h3>
+              <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                Tezkor yangilash
+              </h3>
+
               <div className="space-y-3">
-                <Select label="Yangi status" value={quickStatus} onChange={e=>{setQuickStatus(e.target.value);setTransferLabId('');}}>
+                <Select
+                  label="Yangi status"
+                  value={quickStatus}
+                  onChange={e => { setQuickStatus(e.target.value); setTransferLabId(''); }}
+                >
                   <option value="">— Status tanlang —</option>
-                  {nextStatuses.map(s=><option key={s} value={s}>{STATUS_LABELS[s]?.icon} {STATUS_LABELS[s]?.uz}</option>)}
+                  {nextStatuses.map(s => (
+                    <option key={s} value={s}>{STATUS_LABELS[s]?.icon} {STATUS_LABELS[s]?.uz}</option>
+                  ))}
                 </Select>
-                <div className="flex items-center gap-3"><div className="flex-1 h-px bg-slate-100"/><span className="text-xs text-slate-400">yoki</span><div className="flex-1 h-px bg-slate-100"/></div>
-                <Select label="Ko'chirish" value={transferLabId} onChange={e=>{setTransferLabId(e.target.value);setQuickStatus('');}}>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-slate-100" />
+                  <span className="text-xs text-slate-400">yoki</span>
+                  <div className="flex-1 h-px bg-slate-100" />
+                </div>
+
+                <Select
+                  label="Ko'chirish"
+                  value={transferLabId}
+                  onChange={e => { setTransferLabId(e.target.value); setQuickStatus(''); }}
+                >
                   <option value="">— Laboratoriya tanlang —</option>
-                  {labs.filter(l=>l.id!==sample.currentLabId&&l.isActive!==false).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
+                  {labs.filter(l => l.id !== sample.currentLabId && l.isActive !== false).map(l => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
                 </Select>
-                <Textarea label="Izoh (ixtiyoriy)" value={quickNote} onChange={e=>setQuickNote(e.target.value)} rows={2} placeholder="Qisqacha izoh..."/>
-                <Button onClick={handleQuickUpdate} loading={saving} disabled={!quickStatus&&!transferLabId} className="w-full" icon={<ArrowRight className="w-4 h-4"/>}>
+
+                <Textarea
+                  label="Izoh (ixtiyoriy)"
+                  value={quickNote}
+                  onChange={e => setQuickNote(e.target.value)}
+                  rows={2}
+                  placeholder="Qisqacha izoh..."
+                />
+
+                <Button
+                  onClick={handleQuickUpdate}
+                  loading={saving}
+                  disabled={!quickStatus && !transferLabId}
+                  className="w-full"
+                  icon={<ArrowRight className="w-4 h-4" />}
+                >
                   {transferLabId ? "Ko'chirish" : 'Yangilash'}
                 </Button>
               </div>
@@ -219,16 +262,20 @@ export default function ScanPage() {
             <Card className="p-5 text-center border-green-200 bg-green-50">
               <div className="text-3xl mb-2">🏁</div>
               <p className="font-bold text-green-700">Barcha sinovlar yakunlandi</p>
+              <p className="text-sm text-green-600 mt-1">Bu namuna uchun boshqa amal yo'q</p>
             </Card>
           )}
-
-          <Button variant="secondary" className="w-full" onClick={resetScan} icon={<ScanLine className="w-4 h-4"/>}>
-            Yangi barcode skanerlash
-          </Button>
         </div>
       )}
 
-      {detailOpen && sample && <SampleDetail sampleId={sample.id} onClose={()=>setDetailOpen(false)} labs={labs}/>}
+      {/* Detail modal */}
+      {detailOpen && sample && (
+        <SampleDetail
+          sampleId={sample.id}
+          onClose={() => setDetailOpen(false)}
+          labs={labs}
+        />
+      )}
     </div>
   );
 }
