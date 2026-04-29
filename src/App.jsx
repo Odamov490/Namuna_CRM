@@ -26,25 +26,15 @@ function AdminRoute({ children }) {
   return children;
 }
 
-function AppLayout({ children }) {
-  const { user } = useApp();
-  return (
-    <div className="flex min-h-screen">
-      <Navbar />
-      <div className={user ? 'app-content' : 'w-full'}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function AppRoutes() {
   const { user, authLoading, toasts } = useApp();
+
   if (authLoading) return <LoadingPage text="Tizim yuklanmoqda..." />;
 
   return (
     <>
-      <AppLayout>
+      <Navbar />
+      <main className={user ? 'pt-16' : ''}>
         <Routes>
           <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
           <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
@@ -56,7 +46,7 @@ function AppRoutes() {
           <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </AppLayout>
+      </main>
       <ToastContainer toasts={toasts} />
     </>
   );
