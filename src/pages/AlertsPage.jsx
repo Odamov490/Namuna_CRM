@@ -1,40 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { alertService } from '../lib/firebase.js';
-import { Button, Card, EmptyState, Spinner, SectionHeader } from '../components/ui/index.jsx';
+import { Button, Card, EmptyState, Spinner, SectionHeader, Badge, SearchInput } from '../components/ui/index.jsx';
 import { useApp } from '../contexts/AppContext.jsx';
 import { timeSince } from '../lib/utils.js';
 
-const ALERT_STYLES = {
-  critical: {
-    bg:    'bg-red-50 border-red-200',
-    badge: 'bg-red-100 text-red-700',
-    label: 'Kritik',
-    img:   'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=48&h=48&q=80&fit=crop',
-  },
-  warning: {
-    bg:    'bg-amber-50 border-amber-200',
-    badge: 'bg-amber-100 text-amber-700',
-    label: 'Ogohlantirish',
-    img:   'https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=48&h=48&q=80&fit=crop',
-  },
-  info: {
-    bg:    'bg-blue-50 border-blue-200',
-    badge: 'bg-blue-100 text-blue-700',
-    label: "Ma'lumot",
-    img:   'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=48&h=48&q=80&fit=crop',
-  },
+const ALERT_CONFIG = {
+  critical: { bg: 'bg-red-50 border-red-100',    badge: 'red',    label: 'Kritik',         icon: '🚨' },
+  warning:  { bg: 'bg-amber-50 border-amber-100', badge: 'yellow', label: 'Ogohlantirish',  icon: '⚠️' },
+  info:     { bg: 'bg-blue-50 border-blue-100',   badge: 'blue',   label: "Ma'lumot",       icon: 'ℹ️' },
 };
 
 export default function AlertsPage() {
   const { showToast } = useApp();
-  const [alerts, setAlerts]     = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [marking, setMarking]   = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [filter, setFilter]     = useState('all'); // 'all' | 'unread' | 'critical'
+  const [alerts, setAlerts]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [marking, setMarking] = useState(false);
+  const [filter, setFilter]   = useState('all');
+  const [search, setSearch]   = useState('');
 
   useEffect(() => {
-    // Real-time subscription
     const unsub = alertService.subscribeToAll(data => {
       setAlerts(data);
       setLoading(false);
@@ -42,112 +26,108 @@ export default function AlertsPage() {
     return unsub;
   }, []);
 
-  const handleMarkRead = async (id) => {
-    await alertService.markRead(id);
-  };
-
+  const handleMarkRead    = id => alertService.markRead(id);
   const handleMarkAllRead = async () => {
     setMarking(true);
     await alertService.markAllRead();
-    showToast("Barcha ogohlantirishlar o'qildi ✅", 'success');
+    showToast("Barcha ogohlantirishlar o'qildi ✓", 'success');
     setMarking(false);
   };
 
-  const handleDeleteRead = async () => {
-    setDeleting(true);
-    await alertService.deleteAllRead();
-    showToast("O'qilganlar o'chirildi", 'success');
-    setDeleting(false);
-  };
+  const unreadCount   = useMemo(() => alerts.filter(a => !a.isRead).length, [alerts]);
+  const criticalCount = useMemo(() => alerts.filter(a => a.type === 'critical').length, [alerts]);
 
-  const filtered = alerts.filter(a => {
-    if (filter === 'unread')   return !a.isRead;
-    if (filter === 'critical') return a.type === 'critical';
+  const filtered = useMemo(() => alerts.filter(a => {
+    if (filter === 'unread'  && a.isRead) return false;
+    if (filter === 'critical' && a.type !== 'critical') return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return a.message?.toLowerCase().includes(q) || a.productName?.toLowerCase().includes(q) || a.barcode?.toLowerCase().includes(q);
+    }
     return true;
-  });
+  }), [alerts, filter, search]);
 
-  const unreadCount   = alerts.filter(a => !a.isRead).length;
-  const criticalCount = alerts.filter(a => a.type === 'critical').length;
-
-  if (loading) return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
+  const filterTabs = [
+    { id: 'all',      label: 'Barchasi',    count: alerts.length },
+    { id: 'unread',   label: "O'qilmagan",  count: unreadCount },
+    { id: 'critical', label: 'Kritik',      count: criticalCount },
+  ];
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="page-body">
       <SectionHeader
-        title="🔔 Ogohlantirishlar"
-        subtitle={unreadCount > 0 ? `${unreadCount} ta o'qilmagan` : "Hammasi o'qilgan"}
-        img="https://images.unsplash.com/photo-1531347669012-4b3f93b1b9b3?w=40&h=40&q=80&fit=crop"
+        icon="🔔"
+        title="Ogohlantirishlar"
+        subtitle={unreadCount > 0 ? `${unreadCount} ta o'qilmagan xabar` : "Barcha xabarlar o'qilgan"}
         action={
-          <div className="flex gap-2">
-            {unreadCount > 0 && (
-              <Button variant="secondary" onClick={handleMarkAllRead} loading={marking} size="sm">
-                ✅ Barchasini o'qildi
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={handleDeleteRead} loading={deleting}>
-              🗑 O'qilganlarni tozalash
+          unreadCount > 0 && (
+            <Button variant="secondary" size="sm" onClick={handleMarkAllRead} loading={marking}>
+              ✓ Barchasini o'qildi
             </Button>
-          </div>
+          )
         }
       />
 
-      {/* Filter chips */}
-      <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
-        {[
-          { id: 'all',      label: `Barchasi (${alerts.length})` },
-          { id: 'unread',   label: `O'qilmagan (${unreadCount})` },
-          { id: 'critical', label: `Kritik (${criticalCount})` },
-        ].map(f => (
-          <button key={f.id} onClick={() => setFilter(f.id)}
-            className={`px-3 py-1.5 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-              filter === f.id
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}>
-            {f.label}
-          </button>
-        ))}
+      {/* Search + filter bar */}
+      <div className="flex flex-wrap gap-3 mb-5">
+        <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Ogohlantirishlarni qidirish..." className="flex-1 min-w-[200px]" />
+        <div className="flex gap-1">
+          {filterTabs.map(f => (
+            <button key={f.id} onClick={() => setFilter(f.id)}
+              className={`chip ${filter === f.id ? 'active' : ''}`}>
+              {f.label}
+              <span className={`text-xs font-black ml-0.5 ${filter === f.id ? 'text-blue-600' : 'text-slate-400'}`}>
+                ({f.count})
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <EmptyState
-          img="https://images.unsplash.com/photo-1531347669012-4b3f93b1b9b3?w=80&h=80&q=80&fit=crop"
-          title="Ogohlantirishlar yo'q"
-          subtitle="Hozircha hech qanday ogohlantirish yo'q"
-        />
+      {loading ? (
+        <div className="flex justify-center py-16"><Spinner size="lg" /></div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon="🔔" title="Ogohlantirishlar yo'q" subtitle="Hozircha hech qanday ogohlantirish mavjud emas" />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filtered.map(alert => {
-            const style = ALERT_STYLES[alert.type] || ALERT_STYLES.info;
+            const cfg = ALERT_CONFIG[alert.type] || ALERT_CONFIG.info;
             return (
-              <Card key={alert.id}
-                className={`p-4 border ${style.bg} ${alert.isRead ? 'opacity-60' : ''} transition-all`}>
+              <div key={alert.id}
+                className={`card p-4 border transition-all animate-fade ${cfg.bg} ${alert.isRead ? 'opacity-60' : ''}`}>
                 <div className="flex items-start gap-3">
-                  <img src={style.img} alt={style.label}
-                    className={`w-12 h-12 rounded-xl object-cover flex-shrink-0 ${alert.isRead ? 'grayscale' : ''}`} />
+                  {/* Icon */}
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${
+                    alert.isRead ? 'bg-slate-100 grayscale' : cfg.bg
+                  }`}>
+                    {cfg.icon}
+                  </div>
+
+                  {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2 flex-wrap mb-1">
-                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-lg ${style.badge}`}>
-                        {style.label}
-                      </span>
-                      <p className="text-xs text-slate-400 flex-shrink-0">{timeSince(alert.createdAt)}</p>
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <Badge color={cfg.badge}>{cfg.label}</Badge>
+                      {!alert.isRead && (
+                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse flex-shrink-0" title="O'qilmagan" />
+                      )}
+                      <span className="text-xs text-slate-400 ml-auto flex-shrink-0">{timeSince(alert.createdAt)}</span>
                     </div>
-                    <p className="font-semibold text-slate-800 text-sm">{alert.message}</p>
+                    <p className="text-sm font-semibold text-slate-800 leading-snug">{alert.message}</p>
                     {alert.productName && (
                       <p className="text-xs text-slate-500 mt-0.5">
                         📦 {alert.productName}
-                        {alert.barcode && <span className="ml-1 font-mono">({alert.barcode})</span>}
+                        {alert.barcode && <span className="ml-1 font-mono text-slate-400">({alert.barcode})</span>}
                       </p>
                     )}
                     {!alert.isRead && (
                       <button onClick={() => handleMarkRead(alert.id)}
-                        className="text-xs font-semibold text-blue-600 hover:underline mt-2 block">
-                        O'qildi deb belgilash →
+                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 mt-2 inline-flex items-center gap-1 hover:underline transition-colors">
+                        ✓ O'qildi deb belgilash
                       </button>
                     )}
                   </div>
                 </div>
-              </Card>
+              </div>
             );
           })}
         </div>
